@@ -16,7 +16,7 @@ const INR_BALANCES = {
     }
   };
 
-  const ORDERBOOK = {
+export const ORDERBOOK = {
     "BTC_USDT_10_Oct_2024_9_30": {
              "yes": {
                  9.5: {
@@ -186,7 +186,6 @@ app.post("/order/buy", (req, res) => {
   }
 
   else{
-    // 3 cases 
     // 1st case -> create a no Order with 10-x
     if (!ORDERBOOK[stockSymbol]) {
       ORDERBOOK[stockSymbol] = { yes: {}, no: {} }; 
@@ -272,7 +271,6 @@ app.post("/order/sell",(req,res)=>{
     let totalPrice = ORDERBOOK[stockSymbol][stockType][price].total ;
     for(const stocks in ORDERBOOK[stockSymbol][stockType][price].orders){
       totalPrice+=ORDERBOOK[stockSymbol][stockType][price].orders[stocks];
-  
     }
     ORDERBOOK[stockSymbol][stockType][price].total = totalPrice
     if(STOCK_BALANCES[userId][stockSymbol][stockType].quantity<quantity){
