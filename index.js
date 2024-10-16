@@ -66,6 +66,7 @@ const INR_BALANCES = {
 app.post("/user/create/:userId",(req,res)=>{
     const userId = req.params.userId;
     INR_BALANCES[userId]={balance:0,locked:0};
+    STOCK_BALANCES[userId]={}
     res.status(201).json({message: `User ${userId} created`});
 })
 
@@ -73,10 +74,12 @@ app.post("/user/create/:userId",(req,res)=>{
 app.post("/symbol/create/:stockSymbol",(req,res)=>{
     const stockSymbol = req.params.stockSymbol;
     const users = Object.keys(STOCK_BALANCES);
+    console.log(users)
     for(const userId of users){
         STOCK_BALANCES[userId][stockSymbol]={"yes":{quantity:1,locked:0}};
     }
-    res.status(201).json({message:`Symbol ${stockSymbol} created`});
+    // res.status(201).json({message:`Symbol ${stockSymbol} created`});
+    res.json({STOCK_BALANCES})
 })
 
 
@@ -189,16 +192,20 @@ app.post("/order/buy", (req, res) => {
       ORDERBOOK[stockSymbol] = { yes: {}, no: {} }; 
     }
 
+
     const reverseStockType = stockType === "yes" ?"no":"yes";
     const reverseAmount = 10 - (price / 100);
 
+     // Check if reverseStockType exists in the order book, if not, initialize it
+   if (!ORDERBOOK[stockSymbol][reverseStockType]) {
+    ORDERBOOK[stockSymbol][reverseStockType] = { total: 0, orders: {} };
+   }
+
     if(ORDERBOOK[stockSymbol][stockType] && !ORDERBOOK[stockSymbol][reverseStockType].hasOwnProperty(reverseAmount)){
-      ORDERBOOK[stockSymbol] = {
-        [reverseStockType]: {
-          "total": reverseAmount,
-          "orders": {
-            [userId]: reverseAmount
-          }
+      ORDERBOOK[stockSymbol][reverseStockType][reverseAmount] = {
+        "total": reverseAmount,
+        "orders": {
+          [userId]: reverseAmount
         }
       }
       INR_BALANCES[userId].balance -=(price*quantity);
@@ -231,7 +238,7 @@ app.post("/order/buy", (req, res) => {
 app.post("/order/sell",(req,res)=>{
   const {userId , stockSymbol , quantity , price , stockType} = req.body;
 
-  if (!STOCK_BALANCES[userId]) {
+  if (!STOCK_BALANCES[userId] || !STOCK_BALANCES[userId][stockSymbol] || !STOCK_BALANCES[userId][stockSymbol][stockType]) {
     return res.status(400).json({ message: "User doesn't exist or doesn't have stocks" });
   }
 
@@ -244,20 +251,22 @@ app.post("/order/sell",(req,res)=>{
     return res.status(400).json({message:"you have not enough quantity to sell Stock"})
   }
   
-  if (!ORDERBOOK[stockSymbol][stockType][price]) {
+  if (!ORDERBOOK[stockSymbol] || !ORDERBOOK[stockSymbol][stockType] || !ORDERBOOK[stockSymbol][stockType][price]) {
+  ORDERBOOK[stockSymbol] = ORDERBOOK[stockSymbol] || { yes: {}, no: {} };
+  ORDERBOOK[stockSymbol][stockType] = ORDERBOOK[stockSymbol][stockType] || {};
   ORDERBOOK[stockSymbol][stockType][price]={
     "total":quantity,
       "orders":{
         [userId]:quantity
     }
   }
-  console.log(":hii")
+  
   STOCK_BALANCES[userId][stockSymbol][stockType].locked +=quantity;
   STOCK_BALANCES[userId][stockSymbol][stockType].quantity -=quantity;
   }
  
  else  if(ORDERBOOK[stockSymbol][stockType][price]){
-    console.log("hi")
+  
     ORDERBOOK[stockSymbol][stockType][price].orders[userId] = quantity
     ORDERBOOK[stockSymbol][stockType][price].total =0;
     let totalPrice = ORDERBOOK[stockSymbol][stockType][price].total ;
@@ -273,7 +282,7 @@ app.post("/order/sell",(req,res)=>{
       STOCK_BALANCES[userId][stockSymbol][stockType].locked +=quantity;
       STOCK_BALANCES[userId][stockSymbol][stockType].quantity -=quantity;
     }
-   
+
   }
 
   res.json({ORDERBOOK , INR_BALANCES , STOCK_BALANCES})
@@ -327,6 +336,6 @@ app.post("/trade/mint",(req,res)=>{
 export default app;
 
 
-    app.listen(3000, () => {
-        console.log("Server is running on port 3000");
+app.listen(3000, () => {
+      console.log("Server is running on port 3000");
     });
