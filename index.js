@@ -1,8 +1,6 @@
-import express, { json } from 'express';
-import dotenv from 'dotenv';
-dotenv.config();
+import express from 'express';
 const app = express();
-const port = process.env.PORT || 3000;
+const router = express.Router();
 
 app.use(express.json());
 const INR_BALANCES = {
@@ -74,9 +72,18 @@ app.post("/user/create/:userId",(req,res)=>{
 app.post("/symbol/create/:stockSymbol",(req,res)=>{
     const stockSymbol = req.params.stockSymbol;
     const users = Object.keys(STOCK_BALANCES);
-    console.log(users)
+    const obj = {
+      "yes":{
+          "quantity":0,
+          "locked":0
+      }
+      ,"no":{
+          "quantity":0,
+          "locked":0  
+      }
+    }
     for(const userId of users){
-        STOCK_BALANCES[userId][stockSymbol]={"yes":{quantity:1,locked:0}};
+        STOCK_BALANCES[userId][stockSymbol]={...obj}
     }
     // res.status(201).json({message:`Symbol ${stockSymbol} created`});
     res.json({STOCK_BALANCES})

@@ -4,9 +4,17 @@ import { ORDERBOOK } from '../index.js';
 const dataString = JSON.stringify(ORDERBOOK);
 console.log(dataString);
 
-
-async function init(){
+export async function init(){
     await redis.rpush("json" , dataString);
 }
 
+export async function remove(){
+    await redis.lpop("json");
+}
+
 init();
+
+
+
+
+
