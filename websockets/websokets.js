@@ -1,6 +1,5 @@
 import express, { json } from 'express'
 import { WebSocketServer } from 'ws'
-import { ORDERBOOK } from '../index.js';
 import Redis from "ioredis";
 
 const redis = new Redis();

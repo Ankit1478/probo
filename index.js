@@ -1,4 +1,6 @@
 import express from 'express';
+import dotenv from 'dotenv';
+dotenv.config();
 const app = express();
 const router = express.Router();
 
@@ -74,11 +76,11 @@ app.post("/symbol/create/:stockSymbol",(req,res)=>{
     const users = Object.keys(STOCK_BALANCES);
     const obj = {
       "yes":{
-          "quantity":0,
+          "quantity":1,
           "locked":0
       }
       ,"no":{
-          "quantity":0,
+          "quantity":1,
           "locked":0  
       }
     }
