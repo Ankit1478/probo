@@ -1,348 +1,185 @@
 import express from 'express';
-import dotenv from 'dotenv';
-dotenv.config();
-const app = express();
-const router = express.Router();
+import { createClient } from 'redis';
+import { v4 as uuidv4 } from 'uuid';
 
+const app = express();
 app.use(express.json());
+
+const client = createClient();
+const pubsub = createClient();
+
+
 const INR_BALANCES = {
-    "user1": {
-       balance: 10000,
-       locked: 0
-    },
-    "user2": {
-       balance: 10000,
-       locked: 10
-    }
-  };
+  "user1": {
+    balance: 10000,
+    locked: 0
+  },
+  "user2": {
+    balance: 10000,
+    locked: 10
+  }
+};
 
 export const ORDERBOOK = {
-    "BTC_USDT_10_Oct_2024_9_30": {
-             "yes": {
-                 9.5: {
-                     "total": 12,
-                     orders: {
-                         "user1": 2,
-                         "user2": 10
-                     }
-                 },
-                 8.5: {
-                     "total": 12,
-                     orders: {
-                         "user1": 3,
-                         "user2": 3,
-                         "user3": 6
-                     }
-                 },
-             },
-             "no": {
-            
-             }
-    }
- }
+  "BTC_USDT_10_Oct_2024_9_30": {
+    "yes": {
+      9.5: {
+        "total": 12,
+        orders: {
+          "user1": 2,
+          "user2": 10
+        }
+      },
+      8.5: {
+        "total": 12,
+        orders: {
+          "user1": 3,
+          "user2": 3,
+          "user3": 6
+        }
+      },
+    },
+    "no": {
 
- 
- const STOCK_BALANCES = {
-	user1: {
-	   "BTC_USDT_10_Oct_2024_9_30": {
-		   "yes": {
-			   "quantity": 100,
-			   "locked": 0
-		   },
-        
-	   }
-	},
-	user2: {
-		"BTC_USDT_10_Oct_2024_9_30": {
-		   "no": {
-			   "quantity": 3,
-			   "locked": 4
-		   }
-	   }
-	}
+    }
+  }
 }
 
+const STOCK_BALANCES = {
+  user1: {
+    "BTC_USDT_10_Oct_2024_9_30": {
+      "yes": {
+        "quantity": 100,
+        "locked": 0
+      },
 
-app.post("/user/create/:userId",(req,res)=>{
-    const userId = req.params.userId;
-    INR_BALANCES[userId]={balance:0,locked:0};
-    STOCK_BALANCES[userId]={}
-    res.status(201).json({message: `User ${userId} created`});
-})
-
-
-app.post("/symbol/create/:stockSymbol",(req,res)=>{
-    const stockSymbol = req.params.stockSymbol;
-    const users = Object.keys(STOCK_BALANCES);
-    const obj = {
-      "yes":{
-          "quantity":1,
-          "locked":0
-      }
-      ,"no":{
-          "quantity":1,
-          "locked":0  
+    }
+  },
+  user2: {
+    "BTC_USDT_10_Oct_2024_9_30": {
+      "no": {
+        "quantity": 3,
+        "locked": 4
       }
     }
-    for(const userId of users){
-        STOCK_BALANCES[userId][stockSymbol]={...obj}
+  }
+}
+
+async function pushtoRedis(data) {
+  // Push data to Redis queue
+  await client.rPush("RedisQueue", JSON.stringify(data));
+  console.log("Data pushed to Redis queue");
+}
+
+//step -1 user Create a account  
+//step-2 user onramp money to their aoccount
+//step-3 create stockSymbol
+//stpe-4 get user balance 
+//step - 4 get stock balance 
+
+
+
+app.post("/user/create/:userId", (req, res) => {
+  const userId = req.params.userId;
+  INR_BALANCES[userId] = { balance: 0, locked: 0 };
+  if (!STOCK_BALANCES[userId]) STOCK_BALANCES[userId] = {}
+  pushtoRedis("newUser", userId);
+  res.status(201).json({ INR_BALANCES, STOCK_BALANCES });
+})
+
+app.post('/onramp/inr', (req, res) => {
+  const { userId, amount } = req.body;
+  INR_BALANCES[userId].balance += parseInt(amount);
+  const addBalanceToUserAcount = INR_BALANCES[userId];
+  pushtoRedis("onramp", addBalanceToUserAcount);
+  res.json({ message: `Onramped ${userId} with amount ${amount}` });
+})
+
+app.post("/create/stockSymbol", (req, res) => {
+  const { userId, stockSymbol } = req.body;
+  STOCK_BALANCES[userId] = {
+    [stockSymbol]: {
+      "yes": {
+        "quantity": 0,
+        "locked": 0
+      }
+      ,
+      "no": {
+        "quantity": 0,
+        "locked": 0
+      }
     }
-    // res.status(201).json({message:`Symbol ${stockSymbol} created`});
-    res.json({STOCK_BALANCES})
+  }
+  pushtoRedis("stockSymbol", stockSymbol);
+  // res.status(201).json({message:`Symbol ${stockSymbol} created`});
+  res.json({ STOCK_BALANCES })
 })
 
-
-
-app.get("/orderbook",(req,res)=>{
-    return res.json({ORDERBOOK});
-})
-
-
-
-app.get("/balances/inr", (req, res) => {
-    return res.json(INR_BALANCES);  
-});
-
-
-app.get("/balances/stock",(req,res)=>{
-    return res.json(STOCK_BALANCES);
-})
 
 //get user balance
-app.get("/balances/:userId",(req,res)=>{    
-    const userId = req.params.userId;
-    const balance = INR_BALANCES[userId].balance;
-    return res.json({balance});
-})
-
-app.post('/onramp/inr',(req,res)=>{
-    const {userId ,amount} = req.body;
-    INR_BALANCES[userId].balance+=parseInt(amount);
-   
-    res.json({message:`Onramped ${userId} with amount ${amount}`});
-})
-
-//get stsock balance
-app.get("/balance/stock/:userId",(req,res)=>{    
-    const userId = req.params.userId;
-    const stockBalance = STOCK_BALANCES[userId];
-    return res.json({stockBalance});
-})
-
-
-app.post("/order/buy", (req, res) => {
-  const { userId, stockSymbol, quantity, price, stockType } = req.body;
-
-  // Check if the user exists
-  if (!INR_BALANCES[userId]) {
-    return res.status(400).send({ message: "User not found" });
-  }
-  
-  let userBalance = INR_BALANCES[userId].balance / 100;
-  let totalCost = (price/100) * quantity;
-
-  // Check if user has sufficient INR balance 
-  if (userBalance < totalCost) {
-    return res.status(400).send({ message: "Insufficient INR balance" });
-  }
- 
-  let remainingQuantity = quantity;
-  let totalSpent = 0;
-
-
-   // Exact price match
-  if(ORDERBOOK[stockSymbol][stockType].hasOwnProperty(price)){
-  if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][stockType] && ORDERBOOK[stockSymbol][stockType][price]  ) {
-    let stocks = ORDERBOOK[stockSymbol][stockType][price].orders;
-  
-    for(const seller in stocks){
-      if(remainingQuantity==0)break;
-      let availableQuantity = stocks[seller];
-      //how many stocks i have to buy 
-      let boughtQuantity = Math.min(availableQuantity , remainingQuantity);
-
-      // stocks buy from sellers
-      stocks[seller]-=boughtQuantity;
-      if(stocks[seller]==0){
-        delete stocks[seller];
-      }
-
-      let transactionAmount = boughtQuantity * price;
-      INR_BALANCES[userId].balance -= transactionAmount;
-      INR_BALANCES[seller].balance += transactionAmount;
-     
-      
-      if(!STOCK_BALANCES[userId][stockSymbol]){
-        STOCK_BALANCES[userId][stockSymbol]={};
-      }
-      if(!STOCK_BALANCES[userId][stockSymbol][stockType]){
-        STOCK_BALANCES[userId][stockSymbol][stockType]={quantity:0,locked:0};
-      }
-      STOCK_BALANCES[userId][stockSymbol][stockType].quantity += parseInt(boughtQuantity);
-
-      remainingQuantity -= boughtQuantity;
-      totalSpent += transactionAmount;
-
-      ORDERBOOK[stockSymbol][stockType][price].total -= (quantity - remainingQuantity)
-      
-
-      if (ORDERBOOK[stockSymbol][stockType][price].total === 0) {
-        delete ORDERBOOK[stockSymbol][stockType][price];
-      }
-      INR_BALANCES[userId].locked -= quantity;
-    }
-  }
-  }
-
-  else{
-    // 1st case -> create a no Order with 10-x
-    if (!ORDERBOOK[stockSymbol]) {
-      ORDERBOOK[stockSymbol] = { yes: {}, no: {} }; 
-    }
-
-
-    const reverseStockType = stockType === "yes" ?"no":"yes";
-    const reverseAmount = 10 - (price / 100);
-
-     // Check if reverseStockType exists in the order book, if not, initialize it
-   if (!ORDERBOOK[stockSymbol][reverseStockType]) {
-    ORDERBOOK[stockSymbol][reverseStockType] = { total: 0, orders: {} };
-   }
-
-    if(ORDERBOOK[stockSymbol][stockType] && !ORDERBOOK[stockSymbol][reverseStockType].hasOwnProperty(reverseAmount)){
-      ORDERBOOK[stockSymbol][reverseStockType][reverseAmount] = {
-        "total": reverseAmount,
-        "orders": {
-          [userId]: reverseAmount
-        }
-      }
-      INR_BALANCES[userId].balance -=(price*quantity);
-      INR_BALANCES[userId].locked +=(price*quantity);
-
-      // it will sell by no 
-      if(!STOCK_BALANCES[userId][stockSymbol][reverseStockType]){
-        STOCK_BALANCES[userId][stockSymbol]={
-          [reverseStockType]:{
-            "quantity":0,
-            "locked":quantity
-          }
-        }
-      }
-    }
-
-    return res.json( {ORDERBOOK })
-    
-  }
-  
-  res.status(200).send({ 
-    message: "Order successfully filled",
-    quantityFilled: quantity,
-    totalSpent,
-    INR_BALANCES
+app.get("/balances/:userId", async (req, res) => {
+  const userId = req.params.userId;
+  const requestId = uuidv4();
+  // Push ino Queue
+  pushtoRedis({
+    type: "getUserBalance",
+    data: userId,
+    requestId:requestId
   });
-});
 
-
-app.post("/order/sell",(req,res)=>{
-  const {userId , stockSymbol , quantity , price , stockType} = req.body;
-
-  if (!STOCK_BALANCES[userId] || !STOCK_BALANCES[userId][stockSymbol] || !STOCK_BALANCES[userId][stockSymbol][stockType]) {
-    return res.status(400).json({ message: "User doesn't exist or doesn't have stocks" });
-  }
-
-  if (quantity <= 0) {
-    return res.status(400).json({ message: "Quantity must be greater than zero" });
-  }
-  
-
-  if(STOCK_BALANCES[userId][stockSymbol][stockType].quantity<quantity){
-    return res.status(400).json({message:"you have not enough quantity to sell Stock"})
-  }
-  
-  if (!ORDERBOOK[stockSymbol] || !ORDERBOOK[stockSymbol][stockType] || !ORDERBOOK[stockSymbol][stockType][price]) {
-  ORDERBOOK[stockSymbol] = ORDERBOOK[stockSymbol] || { yes: {}, no: {} };
-  ORDERBOOK[stockSymbol][stockType] = ORDERBOOK[stockSymbol][stockType] || {};
-  ORDERBOOK[stockSymbol][stockType][price]={
-    "total":quantity,
-      "orders":{
-        [userId]:quantity
-    }
-  }
-  
-  STOCK_BALANCES[userId][stockSymbol][stockType].locked +=quantity;
-  STOCK_BALANCES[userId][stockSymbol][stockType].quantity -=quantity;
-  }
- 
- else  if(ORDERBOOK[stockSymbol][stockType][price]){
-  
-    ORDERBOOK[stockSymbol][stockType][price].orders[userId] = quantity
-    ORDERBOOK[stockSymbol][stockType][price].total =0;
-    let totalPrice = ORDERBOOK[stockSymbol][stockType][price].total ;
-    for(const stocks in ORDERBOOK[stockSymbol][stockType][price].orders){
-      totalPrice+=ORDERBOOK[stockSymbol][stockType][price].orders[stocks];
-    }
-    ORDERBOOK[stockSymbol][stockType][price].total = totalPrice
-    if(STOCK_BALANCES[userId][stockSymbol][stockType].quantity<quantity){
-      return res.json({message:"you have not enough quantity to sell Stock"})
+  pubsub.subscribe('fetchUserBalance',(message)=>{
+    const data = JSON.parse(message);
+    console.log(data);
+    if(data.requestId===requestId){
+     return res.status(201).json({message:data.msg})
     }
     else{
-      STOCK_BALANCES[userId][stockSymbol][stockType].locked +=quantity;
-      STOCK_BALANCES[userId][stockSymbol][stockType].quantity -=quantity;
+      return res.status(400).json({message:data.msg})
     }
-
-  }
-
-  res.json({ORDERBOOK , INR_BALANCES , STOCK_BALANCES})
+  })
 })
 
-app.post("/trade/mint",(req,res)=>{
-    const{userId , stockSymbol , quantity}= req.body;
 
-    if (!INR_BALANCES[userId]) {
-      return res.status(404).json({ error: `User ${userId} not found` });
+//get stock balance
+app.get("/balance/stock/:userId/:stockSymbol/:stocktype", (req, res) => {
+  const userId = req.params.userId;
+  const stockSymbol = req.params.stockSymbol;
+  const stockType = req.params.stocktype;
+  if (!STOCK_BALANCES[userId][stockSymbol]) {
+    return res.json({ message: "Please Create Stock Symbol first" })
   }
-
-  if(!STOCK_BALANCES[userId][stockSymbol]){
-    return STOCK_BALANCES[userId][stockSymbol]={};
-  }
- 
-  const  userBalance = INR_BALANCES[userId].balance;
-  const price = parseInt(userBalance);
-  const totalBalance =  price*quantity*2;
-
-  
-  if(!userId || !stockSymbol || !quantity){
-      res.json("please add valuebale information")
-    }
-
-
-    if(!STOCK_BALANCES[userId][stockSymbol].yes){
-         STOCK_BALANCES[userId][stockSymbol]={
-            yes:{
-                "quantity": quantity,
-                "locked": 0
-            }
-        }
-
-    }
-    if(!STOCK_BALANCES[userId][stockSymbol].no){
-        STOCK_BALANCES[userId][stockSymbol].no={
-                "quantity": quantity,
-                "locked": 0
-        }
-    }
-
-    STOCK_BALANCES[userId][stockSymbol].yes.quantity += parseInt(quantity);
-    STOCK_BALANCES[userId][stockSymbol].no.quantity += parseInt(quantity);
-
-    const remainingBalance = totalBalance - price;
-    res.json({ message:  `Minted ${quantity}  'yes' and 'no' tokens for user ${userId}, remaining balance is ${remainingBalance}` });
+  const stockBalance = STOCK_BALANCES[userId][stockSymbol][stockType].quantity;
+  console.log(stockBalance)
+  const userStockbalance = stockBalance;
+  return res.json({ stockBalance });
 })
 
+
+app.post("/buy", async (req, res) => {
+  const { userId, stockSymbol, quantity, price, stockType } = req.body;
+  if (INR_BALANCES[userId].balance < (price * 100) * quantity) {
+    return res.json({ message: "You don't have balance in Your Account Please! Recharge your wallet" });
+  }
+
+  const userWantToBuy = {
+    userId: userId,
+    stockSymbol: stockSymbol,
+    quantity: quantity,
+    price: price,
+    stockType: stockType,
+    useAccountBalance: INR_BALANCES[userId].balance
+  }
+  redis.rpush("buy", JSON.stringify(userWantToBuy))
+  // const a = await redis.lpop("buy");
+  // const b = await JSON.parse(a);
+  // const c = b.userId;
+  res.json({ hii: "hi" })
+})
 
 export default app;
 
-
-app.listen(3000, () => {
-      console.log("Server is running on port 3000");
-    });
+app.listen(3000, async () => {
+  await client.connect();
+  await pubsub.connect();
+  console.log("Server is running on port 3000");
+});
