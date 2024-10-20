@@ -1,31 +1,58 @@
-import express, { json } from 'express'
+import express from 'express'
 import { WebSocketServer } from 'ws'
-import Redis from "ioredis";
-
-const redis = new Redis();
-
-const jsonData = await redis.lrange('json', 0, -1, function(err, reply) {
-    console.log(reply);
-});
-
-
+import { createClient } from 'redis';
 const app = express()
 const httpServer = app.listen(8080)
 
+const clients = new Map();
+const pubsub = createClient();
+await pubsub.connect();
+
 const wss = new WebSocketServer({ server: httpServer });
 
-wss.on('connection', function connection(ws) {
-  ws.on('error', console.error);
+function receivedData(){
+  pubsub.subscribe("sentToWebSocket",(message)=>{
+    const data = JSON.parse(message)
+    // console.log(JSON.parse(data)); 
+    broadcastToClients(data);
+  })
+}
 
+wss.on('connection', function connection(ws) {
+  //Generate a unique id FOr Each client
+  const clientId = generateUniqueId();
+  clients.set(clientId, ws);
+
+  ws.on('error', console.error);
 
   // reading from fronted 
   ws.on('message', function message(data, isBinary) {
-    wss.clients.forEach(function each(client) {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send({data});
-      }
-    });
+    console.log(`Received message from client ${clientId}:`, data.toString());
   });
-  ws.send(JSON.stringify(jsonData));
+
   
+   // When a client disconnects, remove them from the map
+   ws.on('close', () => {
+    clients.delete(clientId);
+  });
+
 });
+
+//
+function broadcastToClients(data) {
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(data));
+    }
+  });
+}
+
+setInterval(()=>{
+  receivedData();
+},5000)
+
+function generateUniqueId() {
+  return Math.random().toString(36).substr(2, 9);
+}
+
+console.log('WebSocket server is running on port 8080');

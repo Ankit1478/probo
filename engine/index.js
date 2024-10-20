@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { json } from 'express';
 const app = express();
 import { createClient } from 'redis';
 
@@ -6,7 +6,6 @@ const client = createClient();
 const pubsub = createClient();
 await client.connect();
 
-// console.log( await client.lPop("RedisQueue"))
 
 app.use(express.json());
 const INR_BALANCES = {
@@ -20,7 +19,7 @@ const INR_BALANCES = {
     }
 };
 
-export const ORDERBOOK = {
+ const ORDERBOOK = {
     "BTC_USDT_10_Oct_2024_9_30": {
         "yes": {
             9.5: {
@@ -44,7 +43,7 @@ export const ORDERBOOK = {
     }
 }
 
-const STOCK_BALANCES = {
+ const STOCK_BALANCES = {
     user1: {
         "BTC_USDT_10_Oct_2024_9_30": {
             "yes": {
@@ -70,12 +69,10 @@ const STOCK_BALANCES = {
 async function startTask(datas) {
    const {type , data , requestId } = JSON.parse(datas)
    
-    console.log(data)
     switch (type) {
         case 'getUserBalance':
             const userId = data
             if(!INR_BALANCES.hasOwnProperty(userId)){
-               
                 await pubsub.publish("fetchUserBalance",JSON.stringify({
                     requestId: requestId,
                     error:true,
@@ -88,7 +85,485 @@ async function startTask(datas) {
                     error:false,
                     msg:`${userId} exists `
                 })) 
-        }
+            }
+            break;  
+           
+        case 'onrampMoney':
+            const amount = data.amount;
+            const userIdMoney = data.userId;
+            console.log(amount)
+            if(!INR_BALANCES[userIdMoney]){
+                await pubsub.publish("accountUpdate",JSON.stringify({
+                    requestId: requestId,
+                    error:true,
+                    msg:"No balance in Your account"
+                }))
+            }
+            else{
+                INR_BALANCES[userIdMoney].balance += parseInt(amount);
+                await pubsub.publish("accountUpdate",JSON.stringify({
+                requestId: requestId,
+                error:false,
+                msg:`${amount} has added in ${userIdMoney}`
+            }))
+            }
+            
+
+        break;
+
+         case 'newUser':
+            const newuserId = data;
+
+            if(INR_BALANCES[newuserId]){
+                await pubsub.publish("newuserAdded",JSON.stringify({
+                    requestId: requestId,
+                    error:true,
+                    msg:`${newuserId} already Exists !`
+                }))
+            }
+            else{
+                INR_BALANCES[newuserId] = { balance: 0, locked: 0 };
+                STOCK_BALANCES[newuserId] = { "BTC_USDT_10_Oct_2024_9_30": {
+                    "yes": {
+                        "quantity": 2,
+                        "locked": 10
+                    },
+                }}
+                console.log(STOCK_BALANCES)
+    
+                await pubsub.publish("newuserAdded",JSON.stringify({
+                    requestId: requestId,
+                    error:false,
+                    msg:`${newuserId} created successfully !`
+                }))
+            }
+            break;
+
+        case 'newStockSymbol':
+            const newstockSymbol = data
+            console.log(newstockSymbol)
+            const users = Object.keys(STOCK_BALANCES);
+            for(const userId of users){
+                STOCK_BALANCES[userId][newstockSymbol]={"yes":{quantity:1,locked:0}};
+            }
+            ORDERBOOK[newstockSymbol] = {};
+            await pubsub.publish("symbolCreated" ,JSON.stringify({
+                requestId: requestId,
+                error:false,
+                msg:`${newstockSymbol} created successfully !`
+            }))
+
+         break;
+
+        case 'getStockBalance':
+            const stockholderUserId = data.userId
+            const stockSymobolHold = data.stockSymbol
+
+            if (!STOCK_BALANCES[stockholderUserId][stockSymobolHold]) {
+                await pubsub.publish("fetchStockBalance" ,JSON.stringify({
+                    requestId: requestId,
+                    error:true,
+                    msg:`${stockholderUserId} doesn't exits !`
+                }))
+              }
+            else{
+                const stockBalance = STOCK_BALANCES[stockholderUserId][stockSymobolHold];
+                await pubsub.publish("fetchStockBalance" ,JSON.stringify({
+                    requestId: requestId,
+                    error:false,
+                    msg:`${JSON.stringify(stockBalance)}`
+                }))
+            }
+        break;
+
+        case 'buy':
+            const TRANSACTIONS = [];
+            const buyerId = data.userId
+            const stockSymbol = data.stockSymbol
+            const quantity = data.quantity
+            const price = data.price
+            const stockType = data.stockType
+
+          
+           
+            if (!INR_BALANCES[buyerId]) {
+                await pubsub.publish("buyStocks",JSON.stringify({
+                    requestId: requestId,
+                    error:true,
+                    msg:"User Not Exists"
+                }))
+            }
+
+            let userBalance = INR_BALANCES[buyerId].balance / 100;
+            let totalCost = (price) * quantity;
+            console.log(totalCost)
+           
+
+            // Check if user has sufficient INR balance 
+            if (userBalance < totalCost) {
+                await pubsub.publish("buyStocks",JSON.stringify({
+                    requestId: requestId,
+                    error:true,
+                    msg:json("insufficent Inr")
+                }))
+            }  
+            const eventId = generateEventId(stockSymbol, stockType);
+            //Exact Price Match - Two Cases 
+            if (ORDERBOOK[stockSymbol][stockType].hasOwnProperty(price)) {
+                let remainingQuantity = quantity;
+                let totalSpent = 0;
+
+                const quantityWeNeed = quantity;
+                const quantityHaveInOrderBook = ORDERBOOK[stockSymbol][stockType][price].total;
+
+                if (quantityWeNeed <= quantityHaveInOrderBook) {
+                    //1st case - when Quantity match with same Price 
+                    //2nd case - when we we need less less Quantiy
+
+                    if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][stockType] && ORDERBOOK[stockSymbol][stockType][price]) {
+                        let stocks = ORDERBOOK[stockSymbol][stockType][price].orders;
+
+                        for (const seller in stocks) {
+                            if (remainingQuantity == 0) break;
+                            let availableQuantity = stocks[seller];
+
+                            //how many stocks i have to buy 
+                            let boughtQuantity = Math.min(availableQuantity, remainingQuantity);
+
+
+                            stocks[seller] -= boughtQuantity;
+    
+
+                            if (stocks[seller] == 0) {
+                                delete stocks[seller];
+                            }
+
+                            let transactionAmount = boughtQuantity * price;
+                           
+
+                            remainingQuantity -= boughtQuantity;
+                            // console.log("After remainingQuantity "+remainingQuantity)
+                            totalSpent += transactionAmount;
+
+
+                            ORDERBOOK[stockSymbol][stockType][price].total -= (boughtQuantity);
+
+                            if (ORDERBOOK[stockSymbol][stockType][price].total === 0) {
+                                delete ORDERBOOK[stockSymbol][stockType][price];
+                            }
+
+                            if(STOCK_BALANCES[buyerId][stockSymbol][stockType].quantity > quantity){
+                                await pubsub.publish("buyStocks",JSON.stringify({
+                                    requestId: requestId,
+                                    error:true,
+                                    msg: JSON.stringify("no Enough Quantity") 
+                                }))
+                            }
+                            STOCK_BALANCES[buyerId][stockSymbol][stockType].quantity += parseInt(boughtQuantity);
+                            if (STOCK_BALANCES[seller][stockSymbol][stockType].locked >= boughtQuantity) {
+                                STOCK_BALANCES[seller][stockSymbol][stockType].locked -= parseInt(boughtQuantity);
+                            }
+
+
+
+                            //seller Account INR Update
+                            INR_BALANCES[seller].balance += (transactionAmount*100);
+
+
+                            const newTransaction = {
+                                id: generateUniqueId(),
+                                buyer_account_id: buyerId,
+                                seller_account_id: seller,
+                                trade_qty: boughtQuantity,
+                                buy_price: price,
+                                buyer_order_id: generateUniqueId(),
+                                seller_order_id: generateUniqueId(),
+                                event_id: eventId,
+                            };
+
+                            // Add the new transaction to the TRANSACTIONS array
+                            TRANSACTIONS.push(newTransaction);
+                        }
+
+                        let prices = totalCost * 100;
+                        INR_BALANCES[buyerId].balance -=prices;
+                        console.log(INR_BALANCES[buyerId].balance)
+
+                        const combinedBalances = {
+                            INR_BALANCES,
+                            STOCK_BALANCES,
+                            ORDERBOOK,
+                            TRANSACTIONS
+                          };
+                          
+                        
+                        await pubsub.publish("buyStocks",JSON.stringify({
+                            requestId: requestId,
+                            error:false,
+                            msg: JSON.stringify(combinedBalances) 
+                        }))
+                        await pubsub.publish("sentToWebSocket", JSON.stringify({ ORDERBOOK}))
+                    }
+                }
+                //3rd case - when we need more Quantiy with same Price -> create No order wit same price 
+                else {
+                    let remainingQuantity = quantity;
+                    let totalSpent = 0;
+
+                    if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][stockType] && ORDERBOOK[stockSymbol][stockType][price]) {
+                        let stocks = ORDERBOOK[stockSymbol][stockType][price].orders;
+
+                        for (const seller in stocks) {
+                            if (remainingQuantity == 0) break;
+                            let availableQuantity = stocks[seller];
+
+                            //how many stocks i have to buy 
+                            let boughtQuantity = Math.min(availableQuantity, remainingQuantity);
+
+
+                            stocks[seller] -= boughtQuantity;
+
+                            if (stocks[seller] == 0) {
+                                delete stocks[seller];
+                            }
+
+
+                            let transactionAmount = boughtQuantity * price;
+                            console.log("before" + remainingQuantity)
+                            remainingQuantity -= boughtQuantity;
+                            console.log("after" + remainingQuantity)
+                            totalSpent += transactionAmount;
+
+                            ORDERBOOK[stockSymbol][stockType][price].total -= (boughtQuantity);
+
+
+                            if (ORDERBOOK[stockSymbol][stockType][price].total === 0) {
+                                delete ORDERBOOK[stockSymbol][stockType][price];
+                            }
+
+                            if (!STOCK_BALANCES[buyerId][stockSymbol]) {
+                                STOCK_BALANCES[buyerId][stockSymbol] = {};
+                            }
+                            if (!STOCK_BALANCES[buyerId][stockSymbol][stockType]) {
+                                STOCK_BALANCES[buyerId][stockSymbol][stockType] = { quantity: 0, locked: 0 };
+                            }
+                            STOCK_BALANCES[buyerId][stockSymbol][stockType].quantity += parseInt(boughtQuantity);
+                            console.log(boughtQuantity)
+                            console.log(STOCK_BALANCES[seller][stockSymbol][stockType].locked -= parseInt(boughtQuantity))
+
+                            //seller Account INR Update
+                            INR_BALANCES[seller].balance += parseInt(transactionAmount * 100);
+
+                            const newTransaction = {
+                                id: generateUniqueId(),
+                                buyer_account_id: buyerId,
+                                seller_account_id: seller,
+                                trade_qty: boughtQuantity,
+                                buy_price: price,
+                                buyer_order_id: generateUniqueId(),
+                                seller_order_id: generateUniqueId(),
+                                event_id: eventId,
+                                
+                            };
+
+                            // Add the new transaction to the TRANSACTIONS array
+                            TRANSACTIONS.push(newTransaction);
+
+
+                        }
+
+                        const reverseStockType = stockType === "yes" ? "no" : "yes";
+                        const reverseAmount = 10 - (price);
+
+                        // Check if reverseStockType exists in the order book, if not, initialize it
+                        if (!ORDERBOOK[stockSymbol][reverseStockType]) {
+                            ORDERBOOK[stockSymbol][reverseStockType] = { total: 0, orders: {} };
+                        }
+
+                        if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][reverseStockType]) {
+
+                            ORDERBOOK[stockSymbol][reverseStockType][reverseAmount] = {
+                                "total": parseInt(remainingQuantity),
+                                "order": [
+                                    { [buyerId]: parseInt(remainingQuantity) }
+                                ]
+                            }
+                        }
+
+                        STOCK_BALANCES[buyerId][stockSymbol][stockType].locked += parseInt(remainingQuantity)
+                        INR_BALANCES[buyerId].balance -= parseInt(totalSpent * 100)
+                        INR_BALANCES[buyerId].locked += parseInt((quantity * price) * 100 - (totalSpent * 100));
+                       
+                    }
+                    const combinedBalances = {
+                        INR_BALANCES,
+                        STOCK_BALANCES,
+                        ORDERBOOK,
+                        TRANSACTIONS
+                      };
+                      
+                    
+                    await pubsub.publish("buyStocks",JSON.stringify({
+                        requestId: requestId,
+                        error:false,
+                        msg: JSON.stringify(combinedBalances) 
+                    }))
+
+                    await pubsub.publish("sentToWebSocket", JSON.stringify({ ORDERBOOK}))
+                }
+            }
+            else {
+                let transaction = [];
+                if (!ORDERBOOK[stockSymbol]) {
+                    ORDERBOOK[stockSymbol] = { yes: {}, no: {} };
+                }
+        
+        
+                const reverseStockType = stockType === "yes" ? "no" : "yes";
+                const reverseAmount = 10 - (price);
+        
+        
+                if (!ORDERBOOK[stockSymbol][reverseStockType]) {
+                    ORDERBOOK[stockSymbol][reverseStockType] = { total: 0, orders: {} };
+                }
+        
+                if (ORDERBOOK[stockSymbol][stockType] && !ORDERBOOK[stockSymbol][reverseStockType].hasOwnProperty(reverseAmount)) {
+                    ORDERBOOK[stockSymbol][reverseStockType][reverseAmount] = {
+                        "total": 10 - quantity,
+                        "orders": {
+                            [buyerId]: 10 - quantity
+                        }
+                    }
+        
+                    INR_BALANCES[buyerId].balance -= (price * quantity);
+                    INR_BALANCES[buyerId].locked += (price * quantity);
+        
+                    // it will sell by no 
+                    if (!STOCK_BALANCES[buyerId][stockSymbol][reverseStockType]) {
+                        STOCK_BALANCES[buyerId][stockSymbol] = {
+                            [reverseStockType]: {
+                                "quantity": 0,
+                                "locked": quantity
+                            }
+                        }
+                    }
+        
+                }
+                const newTransaction = {
+                    id: generateUniqueId(),
+                    buyer_account_id: buyerId,
+                    seller_account_id: buyerId,
+                    trade_qty: 10 - quantity,
+                    buy_price: price,
+                    buyer_order_id: generateUniqueId(),
+                    seller_order_id: generateUniqueId(),
+                    event_id: eventId,
+                };
+        
+                // Add the new transaction to the TRANSACTIONS array
+                transaction.push(newTransaction);
+        
+                const combinedBalances = {
+                    INR_BALANCES,
+                    STOCK_BALANCES,
+                    ORDERBOOK,
+                    TRANSACTIONS
+                  };
+                 
+                
+                await pubsub.publish("buyStocks",JSON.stringify({
+                    requestId: requestId,
+                    error:false,
+                    msg: JSON.stringify(combinedBalances) 
+                }))
+
+                await pubsub.publish("sentToWebSocket", JSON.stringify({ ORDERBOOK}))
+
+            }
+        break;
+        case 'sell':
+            let transaction = [];
+            const sellerId = data.userId
+            const sellerStockSymbol = data.stockSymbol
+            const sellerQuantity = data.quantity
+            const sellerPrice = data.price
+            const sellerStockType = data.stockType
+           
+            if (!STOCK_BALANCES[sellerId] || !STOCK_BALANCES[sellerId][sellerStockSymbol] || !STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType]) {
+                await pubsub.publish("sellStocks",JSON.stringify({
+                    requestId: requestId,
+                    error:true,
+                    msg: JSON.stringify("Nop Stocks Found!") 
+                }))
+            }
+
+            const eventIds = generateEventId(sellerStockSymbol, sellerStockType);
+            
+            if (STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].quantity < sellerQuantity) {
+                await pubsub.publish("sellStocks",JSON.stringify({
+                    requestId: requestId,
+                    error:true,
+                    msg: JSON.stringify("you have not enough quantity to sell Stoc") 
+                }))
+            }
+        
+            if (!ORDERBOOK[sellerStockSymbol] || !ORDERBOOK[sellerStockSymbol][sellerStockType] || !ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice]) {
+                ORDERBOOK[sellerStockSymbol] = ORDERBOOK[sellerStockSymbol] || { yes: {}, no: {} };
+                ORDERBOOK[sellerStockSymbol][sellerStockType] = ORDERBOOK[sellerStockSymbol][sellerStockType] || {};
+                ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice] = {
+                    "total": sellerQuantity,
+                    "orders": {
+                        [sellerId]: parseInt(sellerQuantity)
+                    }
+                }
+        
+                STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].locked += sellerQuantity;
+                STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].sellerQuantity -= sellerQuantity;
+            }
+
+            else if (ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice]) {
+                ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice].orders[sellerId] = sellerQuantity
+                ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice].total = 0;
+                let totalsellerPrice = ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice].total;
+                for (const stocks in ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice].orders) {
+                    totalsellerPrice += parseInt(ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice].orders[stocks]);
+                }
+                ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice].total = totalPrice
+                if (STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].quantity < quantity) {
+                    return res.json({ message: "you have not enough quantity to sell Stock" })
+                }
+                else {
+                    STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].locked += parseInt(quantity);
+                    STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].quantity -= parseInt(quantity);
+                }
+            }
+
+            const newTransaction = {
+                id: generateUniqueId(),
+                seller_account_id: sellerId,
+                trade_qty: sellerQuantity,
+                sell_price: sellerPrice,
+                seller_order_id: generateUniqueId(),
+                event_id: eventIds,
+                status: "PENDING"
+            };
+
+            transaction.push(newTransaction);
+        
+            const combinedBalances = {
+                INR_BALANCES,
+                STOCK_BALANCES,
+                ORDERBOOK,
+                transaction
+            };
+              
+            await pubsub.publish("sellStocks",JSON.stringify({
+                requestId: requestId,
+                error:false,
+                msg: JSON.stringify(combinedBalances) 
+            }))
+
+           await pubsub.publish("sentToWebSocket", JSON.stringify({ ORDERBOOK}))
     }
 }
 
@@ -106,295 +581,290 @@ async function worker() {
     }
 }
 
-
-
-const generateEventId = (stockSymbol, stockType) => {
-    return `${stockSymbol}_${stockType}_${Date.now()}`;  // Unique event ID based on symbol, type, and timestamp
-};
-const TRANSACTIONS = [];
 function generateUniqueId() {
     return Math.random().toString(36).substr(2, 9);
 }
 
-app.post("/order/buy", async (req, res) => {
-    // const a = await redis.lpop("buy");
-    // const b = JSON.parse(a);
-    // console.log(b)
+const generateEventId = (stockSymbol, stockType) => {
+    return `${stockSymbol}_${stockType}_${Date.now()}`;  // Unique event ID based on symbol, type, and timestamp
+};
 
 
-    const { userId, stockSymbol, quantity, price, stockType } = req.body;
+// app.post("/order/buy", async (req, res) => {
+//     // const a = await redis.lpop("buy");
+//     // const b = JSON.parse(a);
+//     // console.log(b)
 
-    // Check if the user exists
-    if (!INR_BALANCES[userId]) {
-        return res.status(400).send({ message: "User not found" });
-    }
 
-    let userBalance = INR_BALANCES[userId].balance / 100;
-    let totalCost = (price) * quantity;
+//     // const { userId, stockSymbol, quantity, price, stockType } = req.body;
 
 
-    // Check if user has sufficient INR balance 
-    if (userBalance < totalCost) {
-        return res.status(400).send({ message: "Insufficient INR balance" });
-    }
 
-    const eventId = generateEventId(stockSymbol, stockType);
+   
 
-    //Exact Price Match - Two Cases 
-    if (ORDERBOOK[stockSymbol][stockType].hasOwnProperty(price)) {
-        let remainingQuantity = quantity;
-        let totalSpent = 0;
 
-        const quantityWeNeed = quantity;
-        const quantityHaveInOrderBook = ORDERBOOK[stockSymbol][stockType][price].total;
+//     // // Check if user has sufficient INR balance 
+//     // if (userBalance < totalCost) {
+//     //     return res.status(400).send({ message: "Insufficient INR balance" });
+//     // }
 
-        if (quantityWeNeed <= quantityHaveInOrderBook) {
-            //1st case - when Quantity match with same Price 
-            //2nd case - when we we need less less Quantiy
+//     const eventId = generateEventId(stockSymbol, stockType);
 
-            if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][stockType] && ORDERBOOK[stockSymbol][stockType][price]) {
-                let stocks = ORDERBOOK[stockSymbol][stockType][price].orders;
+//     //Exact Price Match - Two Cases 
+//     if (ORDERBOOK[stockSymbol][stockType].hasOwnProperty(price)) {
+//         let remainingQuantity = quantity;
+//         let totalSpent = 0;
 
-                for (const seller in stocks) {
+//         const quantityWeNeed = quantity;
+//         const quantityHaveInOrderBook = ORDERBOOK[stockSymbol][stockType][price].total;
 
-                    if (remainingQuantity == 0) break;
-                    let availableQuantity = stocks[seller];
+//         if (quantityWeNeed <= quantityHaveInOrderBook) {
+//             //1st case - when Quantity match with same Price 
+//             //2nd case - when we we need less less Quantiy
 
-                    //how many stocks i have to buy 
-                    let boughtQuantity = Math.min(availableQuantity, remainingQuantity);
+//             if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][stockType] && ORDERBOOK[stockSymbol][stockType][price]) {
+//                 let stocks = ORDERBOOK[stockSymbol][stockType][price].orders;
 
+//                 for (const seller in stocks) {
 
-                    stocks[seller] -= boughtQuantity;
-                    console.log(seller)
+//                     if (remainingQuantity == 0) break;
+//                     let availableQuantity = stocks[seller];
 
-                    if (stocks[seller] == 0) {
-                        delete stocks[seller];
-                    }
+//                     //how many stocks i have to buy 
+//                     let boughtQuantity = Math.min(availableQuantity, remainingQuantity);
 
-                    let transactionAmount = boughtQuantity * price;
-                    // console.log("remainingQuantity "+remainingQuantity)
 
-                    remainingQuantity -= boughtQuantity;
-                    // console.log("After remainingQuantity "+remainingQuantity)
-                    totalSpent += transactionAmount;
+//                     stocks[seller] -= boughtQuantity;
+//                     console.log(seller)
 
+//                     if (stocks[seller] == 0) {
+//                         delete stocks[seller];
+//                     }
 
+//                     let transactionAmount = boughtQuantity * price;
+//                     // console.log("remainingQuantity "+remainingQuantity)
 
+//                     remainingQuantity -= boughtQuantity;
+//                     // console.log("After remainingQuantity "+remainingQuantity)
+//                     totalSpent += transactionAmount;
 
-                    ORDERBOOK[stockSymbol][stockType][price].total -= (boughtQuantity);
 
-                    if (ORDERBOOK[stockSymbol][stockType][price].total === 0) {
-                        delete ORDERBOOK[stockSymbol][stockType][price];
-                    }
 
-                    STOCK_BALANCES[userId][stockSymbol][stockType].quantity += parseInt(boughtQuantity);
-                    if (STOCK_BALANCES[seller][stockSymbol][stockType].locked >= boughtQuantity) {
-                        STOCK_BALANCES[seller][stockSymbol][stockType].locked -= parseInt(boughtQuantity);
-                    }
 
-                    //seller Account INR Update
-                    INR_BALANCES[seller].balance += transactionAmount;
+//                     ORDERBOOK[stockSymbol][stockType][price].total -= (boughtQuantity);
 
-                    const newTransaction = {
-                        id: generateUniqueId(),
-                        buyer_account_id: userId,
-                        seller_account_id: seller,
-                        trade_qty: boughtQuantity,
-                        buy_price: price,
-                        buyer_order_id: generateUniqueId(),
-                        seller_order_id: generateUniqueId(),
-                        event_id: eventId,
-                        created_src: "USER",
-                        updated_src: "USER"
-                    };
+//                     if (ORDERBOOK[stockSymbol][stockType][price].total === 0) {
+//                         delete ORDERBOOK[stockSymbol][stockType][price];
+//                     }
 
-                    // Add the new transaction to the TRANSACTIONS array
-                    TRANSACTIONS.push(newTransaction);
-                }
+//                     STOCK_BALANCES[userId][stockSymbol][stockType].quantity += parseInt(boughtQuantity);
+//                     if (STOCK_BALANCES[seller][stockSymbol][stockType].locked >= boughtQuantity) {
+//                         STOCK_BALANCES[seller][stockSymbol][stockType].locked -= parseInt(boughtQuantity);
+//                     }
 
-                let prices = totalCost * 100;
+//                     //seller Account INR Update
+//                     INR_BALANCES[seller].balance += transactionAmount;
 
+//                     const newTransaction = {
+//                         id: generateUniqueId(),
+//                         buyer_account_id: userId,
+//                         seller_account_id: seller,
+//                         trade_qty: boughtQuantity,
+//                         buy_price: price,
+//                         buyer_order_id: generateUniqueId(),
+//                         seller_order_id: generateUniqueId(),
+//                         event_id: eventId,
+//                         created_src: "USER",
+//                         updated_src: "USER"
+//                     };
 
-                INR_BALANCES[userId].balance -= (prices.toFixed(1) * 100);
-                // console.log(INR_BALANCES[userId].balance -= (prices.toFixed(1)))
-                // console.log(INR_BALANCES[userId].balance/100)
+//                     // Add the new transaction to the TRANSACTIONS array
+//                     TRANSACTIONS.push(newTransaction);
+//                 }
 
-                return res.json({ ORDERBOOK, INR_BALANCES, STOCK_BALANCES, TRANSACTIONS })
-            }
-        }
-        //3rd case - when we need more Quantiy with same Price -> create No order wit same price 
-        else {
-            let remainingQuantity = quantity;
-            let totalSpent = 0;
+//                 let prices = totalCost * 100;
 
-            if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][stockType] && ORDERBOOK[stockSymbol][stockType][price]) {
-                let stocks = ORDERBOOK[stockSymbol][stockType][price].orders;
-
-                for (const seller in stocks) {
-                    if (remainingQuantity == 0) break;
-                    let availableQuantity = stocks[seller];
 
-                    //how many stocks i have to buy 
-                    let boughtQuantity = Math.min(availableQuantity, remainingQuantity);
+//                 INR_BALANCES[userId].balance -= (prices.toFixed(1) * 100);
+//                 // console.log(INR_BALANCES[userId].balance -= (prices.toFixed(1)))
+//                 // console.log(INR_BALANCES[userId].balance/100)
 
+//                 return res.json({ ORDERBOOK, INR_BALANCES, STOCK_BALANCES, TRANSACTIONS })
+//             }
+//         }
+//         //3rd case - when we need more Quantiy with same Price -> create No order wit same price 
+//         else {
+//             let remainingQuantity = quantity;
+//             let totalSpent = 0;
 
-                    stocks[seller] -= boughtQuantity;
+//             if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][stockType] && ORDERBOOK[stockSymbol][stockType][price]) {
+//                 let stocks = ORDERBOOK[stockSymbol][stockType][price].orders;
+
+//                 for (const seller in stocks) {
+//                     if (remainingQuantity == 0) break;
+//                     let availableQuantity = stocks[seller];
 
-                    if (stocks[seller] == 0) {
-                        delete stocks[seller];
-                    }
+//                     //how many stocks i have to buy 
+//                     let boughtQuantity = Math.min(availableQuantity, remainingQuantity);
 
 
-                    let transactionAmount = boughtQuantity * price;
-                    console.log("before" + remainingQuantity)
-                    remainingQuantity -= boughtQuantity;
-                    console.log("after" + remainingQuantity)
-                    totalSpent += transactionAmount;
+//                     stocks[seller] -= boughtQuantity;
 
-                    ORDERBOOK[stockSymbol][stockType][price].total -= (boughtQuantity);
+//                     if (stocks[seller] == 0) {
+//                         delete stocks[seller];
+//                     }
 
 
-                    if (ORDERBOOK[stockSymbol][stockType][price].total === 0) {
-                        delete ORDERBOOK[stockSymbol][stockType][price];
-                    }
-
-                    if (!STOCK_BALANCES[userId][stockSymbol]) {
-                        STOCK_BALANCES[userId][stockSymbol] = {};
-                    }
-                    if (!STOCK_BALANCES[userId][stockSymbol][stockType]) {
-                        STOCK_BALANCES[userId][stockSymbol][stockType] = { quantity: 0, locked: 0 };
-                    }
-                    STOCK_BALANCES[userId][stockSymbol][stockType].quantity += parseInt(boughtQuantity);
-                    console.log(boughtQuantity)
-                    console.log(STOCK_BALANCES[seller][stockSymbol][stockType].locked -= parseInt(boughtQuantity))
-
-                    //seller Account INR Update
-                    INR_BALANCES[seller].balance += parseInt(transactionAmount * 100);
-
-                    const newTransaction = {
-                        id: generateUniqueId(),
-                        buyer_account_id: userId,
-                        seller_account_id: seller,
-                        trade_qty: boughtQuantity,
-                        buy_price: price,
-                        buyer_order_id: generateUniqueId(),
-                        seller_order_id: generateUniqueId(),
-                        event_id: eventId,
-                        created_src: "USER",
-                        updated_src: "USER"
-                    };
-
-                    // Add the new transaction to the TRANSACTIONS array
-                    TRANSACTIONS.push(newTransaction);
-
-
-                }
-
-
-
-                // INR_BALANCES[userId].balance -= (prices.toFixed(1)*100);
-                // console.log(INR_BALANCES[userId].balance/100 )
-
-                const reverseStockType = stockType === "yes" ? "no" : "yes";
-                const reverseAmount = 10 - (price);
-
-                // Check if reverseStockType exists in the order book, if not, initialize it
-                if (!ORDERBOOK[stockSymbol][reverseStockType]) {
-                    ORDERBOOK[stockSymbol][reverseStockType] = { total: 0, orders: {} };
-                }
-
-                if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][reverseStockType]) {
-
-                    ORDERBOOK[stockSymbol][reverseStockType][reverseAmount] = {
-                        "total": parseInt(remainingQuantity),
-                        "order": [
-                            { [userId]: parseInt(remainingQuantity) }
-                        ]
-                    }
-                }
-
-                STOCK_BALANCES[userId][stockSymbol][stockType].locked += parseInt(remainingQuantity)
-                INR_BALANCES[userId].balance -= parseInt(totalSpent * 100)
-                INR_BALANCES[userId].locked += parseInt((quantity * price) * 100 - (totalSpent * 100));
-
-
-                //    console.log(remainingQuantity);
-            }
-            return res.json({ ORDERBOOK, INR_BALANCES, STOCK_BALANCES, TRANSACTIONS })
-        }
-    }
-    // Price is not presnt in orderBook 
-    else {
-        let transaction = [];
-        if (!ORDERBOOK[stockSymbol]) {
-            ORDERBOOK[stockSymbol] = { yes: {}, no: {} };
-        }
-
-
-        const reverseStockType = stockType === "yes" ? "no" : "yes";
-        const reverseAmount = 10 - (price / 100);
-
-
-        if (!ORDERBOOK[stockSymbol][reverseStockType]) {
-            ORDERBOOK[stockSymbol][reverseStockType] = { total: 0, orders: {} };
-        }
-
-        if (ORDERBOOK[stockSymbol][stockType] && !ORDERBOOK[stockSymbol][reverseStockType].hasOwnProperty(reverseAmount)) {
-            ORDERBOOK[stockSymbol][reverseStockType][reverseAmount] = {
-                "total": 10 - quantity,
-                "orders": {
-                    [userId]: 10 - quantity
-                }
-            }
-
-            INR_BALANCES[userId].balance -= (price * quantity);
-            INR_BALANCES[userId].locked += (price * quantity);
-
-            // it will sell by no 
-            if (!STOCK_BALANCES[userId][stockSymbol][reverseStockType]) {
-                STOCK_BALANCES[userId][stockSymbol] = {
-                    [reverseStockType]: {
-                        "quantity": 0,
-                        "locked": quantity
-                    }
-                }
-            }
-
-        }
-        const newTransaction = {
-            id: generateUniqueId(),
-            buyer_account_id: userId,
-            seller_account_id: userId,
-            trade_qty: 10 - quantity,
-            buy_price: price,
-            buyer_order_id: generateUniqueId(),
-            seller_order_id: generateUniqueId(),
-            event_id: eventId,
-        };
-
-        // Add the new transaction to the TRANSACTIONS array
-        transaction.push(newTransaction);
-
-        res.json({ ORDERBOOK, STOCK_BALANCES, INR_BALANCES, transaction })
-    }
-
-})
+//                     let transactionAmount = boughtQuantity * price;
+//                     console.log("before" + remainingQuantity)
+//                     remainingQuantity -= boughtQuantity;
+//                     console.log("after" + remainingQuantity)
+//                     totalSpent += transactionAmount;
+
+//                     ORDERBOOK[stockSymbol][stockType][price].total -= (boughtQuantity);
+
+
+//                     if (ORDERBOOK[stockSymbol][stockType][price].total === 0) {
+//                         delete ORDERBOOK[stockSymbol][stockType][price];
+//                     }
+
+//                     if (!STOCK_BALANCES[userId][stockSymbol]) {
+//                         STOCK_BALANCES[userId][stockSymbol] = {};
+//                     }
+//                     if (!STOCK_BALANCES[userId][stockSymbol][stockType]) {
+//                         STOCK_BALANCES[userId][stockSymbol][stockType] = { quantity: 0, locked: 0 };
+//                     }
+//                     STOCK_BALANCES[userId][stockSymbol][stockType].quantity += parseInt(boughtQuantity);
+//                     console.log(boughtQuantity)
+//                     console.log(STOCK_BALANCES[seller][stockSymbol][stockType].locked -= parseInt(boughtQuantity))
+
+//                     //seller Account INR Update
+//                     INR_BALANCES[seller].balance += parseInt(transactionAmount * 100);
+
+//                     const newTransaction = {
+//                         id: generateUniqueId(),
+//                         buyer_account_id: userId,
+//                         seller_account_id: seller,
+//                         trade_qty: boughtQuantity,
+//                         buy_price: price,
+//                         buyer_order_id: generateUniqueId(),
+//                         seller_order_id: generateUniqueId(),
+//                         event_id: eventId,
+//                         created_src: "USER",
+//                         updated_src: "USER"
+//                     };
+
+//                     // Add the new transaction to the TRANSACTIONS array
+//                     TRANSACTIONS.push(newTransaction);
+
+
+//                 }
+
+
+
+//                 // INR_BALANCES[userId].balance -= (prices.toFixed(1)*100);
+//                 // console.log(INR_BALANCES[userId].balance/100 )
+
+//                 const reverseStockType = stockType === "yes" ? "no" : "yes";
+//                 const reverseAmount = 10 - (price);
+
+//                 // Check if reverseStockType exists in the order book, if not, initialize it
+//                 if (!ORDERBOOK[stockSymbol][reverseStockType]) {
+//                     ORDERBOOK[stockSymbol][reverseStockType] = { total: 0, orders: {} };
+//                 }
+
+//                 if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][reverseStockType]) {
+
+//                     ORDERBOOK[stockSymbol][reverseStockType][reverseAmount] = {
+//                         "total": parseInt(remainingQuantity),
+//                         "order": [
+//                             { [userId]: parseInt(remainingQuantity) }
+//                         ]
+//                     }
+//                 }
+
+//                 STOCK_BALANCES[userId][stockSymbol][stockType].locked += parseInt(remainingQuantity)
+//                 INR_BALANCES[userId].balance -= parseInt(totalSpent * 100)
+//                 INR_BALANCES[userId].locked += parseInt((quantity * price) * 100 - (totalSpent * 100));
+
+
+//                 //    console.log(remainingQuantity);
+//             }
+//             return res.json({ ORDERBOOK, INR_BALANCES, STOCK_BALANCES, TRANSACTIONS })
+//         }
+//     }
+//     // Price is not presnt in orderBook 
+//     // else {
+//     //     let transaction = [];
+//     //     if (!ORDERBOOK[stockSymbol]) {
+//     //         ORDERBOOK[stockSymbol] = { yes: {}, no: {} };
+//     //     }
+
+
+//     //     const reverseStockType = stockType === "yes" ? "no" : "yes";
+//     //     const reverseAmount = 10 - (price / 100);
+
+
+//     //     if (!ORDERBOOK[stockSymbol][reverseStockType]) {
+//     //         ORDERBOOK[stockSymbol][reverseStockType] = { total: 0, orders: {} };
+//     //     }
+
+//     //     if (ORDERBOOK[stockSymbol][stockType] && !ORDERBOOK[stockSymbol][reverseStockType].hasOwnProperty(reverseAmount)) {
+//     //         ORDERBOOK[stockSymbol][reverseStockType][reverseAmount] = {
+//     //             "total": 10 - quantity,
+//     //             "orders": {
+//     //                 [userId]: 10 - quantity
+//     //             }
+//     //         }
+
+//     //         INR_BALANCES[userId].balance -= (price * quantity);
+//     //         INR_BALANCES[userId].locked += (price * quantity);
+
+//     //         // it will sell by no 
+//     //         if (!STOCK_BALANCES[userId][stockSymbol][reverseStockType]) {
+//     //             STOCK_BALANCES[userId][stockSymbol] = {
+//     //                 [reverseStockType]: {
+//     //                     "quantity": 0,
+//     //                     "locked": quantity
+//     //                 }
+//     //             }
+//     //         }
+
+//     //     }
+//     //     const newTransaction = {
+//     //         id: generateUniqueId(),
+//     //         buyer_account_id: userId,
+//     //         seller_account_id: userId,
+//     //         trade_qty: 10 - quantity,
+//     //         buy_price: price,
+//     //         buyer_order_id: generateUniqueId(),
+//     //         seller_order_id: generateUniqueId(),
+//     //         event_id: eventId,
+//     //     };
+
+//     //     // Add the new transaction to the TRANSACTIONS array
+//     //     transaction.push(newTransaction);
+
+//     //     res.json({ ORDERBOOK, STOCK_BALANCES, INR_BALANCES, transaction })
+//     // }
+
+// })
 
 
 // Sell 
 app.post("/order/sell", (req, res) => {
-    let transaction = [];
-    const { userId, stockSymbol, quantity, price, stockType } = req.body;
+    // let transaction = [];
+    // const { userId, stockSymbol, quantity, price, stockType } = req.body;
 
-    if (!STOCK_BALANCES[userId] || !STOCK_BALANCES[userId][stockSymbol] || !STOCK_BALANCES[userId][stockSymbol][stockType]) {
-        return res.status(400).json({ message: "User doesn't exist or doesn't have stocks" });
-    }
+    // if (!STOCK_BALANCES[userId] || !STOCK_BALANCES[userId][stockSymbol] || !STOCK_BALANCES[userId][stockSymbol][stockType]) {
+    //     return res.status(400).json({ message: "User doesn't exist or doesn't have stocks" });
+    // }
 
-    if (quantity <= 0) {
-        return res.status(400).json({ message: "Quantity must be greater than zero" });
-    }
+    // if (quantity <= 0) {
+    //     return res.status(400).json({ message: "Quantity must be greater than zero" });
+    // }
 
-    const eventId = generateEventId(stockSymbol, stockType);
+    // const eventId = generateEventId(stockSymbol, stockType);
 
 
     if (STOCK_BALANCES[userId][stockSymbol][stockType].quantity < quantity) {
