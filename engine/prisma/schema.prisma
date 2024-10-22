@@ -10,7 +10,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = "postgresql://neondb_owner:ezCQg8lHNmd4@ep-shiny-paper-a8wblsra.eastus2.azure.neon.tech/neondb?sslmode=require"
+  url      = ""
 }
 
 model Buytrade {
