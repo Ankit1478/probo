@@ -12,8 +12,8 @@ const wss = new WebSocketServer({ server: httpServer });
 
 function receivedData(){
   pubsub.subscribe("sentToWebSocket",(message)=>{
-    const data = JSON.parse(message)
-    // console.log(JSON.parse(data)); 
+    const data = message
+    console.log(data); 
     broadcastToClients(data);
   })
 }
@@ -29,6 +29,7 @@ wss.on('connection', function connection(ws) {
   ws.on('message', function message(data, isBinary) {
     console.log(`Received message from client ${clientId}:`, data.toString());
   });
+
 
   
    // When a client disconnects, remove them from the map
@@ -47,9 +48,9 @@ function broadcastToClients(data) {
   });
 }
 
-setInterval(()=>{
-  receivedData();
-},5000)
+
+receivedData();
+
 
 function generateUniqueId() {
   return Math.random().toString(36).substr(2, 9);
