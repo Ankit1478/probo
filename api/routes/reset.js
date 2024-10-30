@@ -5,8 +5,9 @@ import { RedisPubSub } from "../utils/redisClient.js";
 const redisPubSub = new RedisPubSub();
 
 router.post("/",(req,res)=>{
+
     const requestId = uuidv4()
-    pushtoRedis({
+    redisPubSub.pushtoRedis({
       type: "reset",
       data:{},
       requestId: requestId

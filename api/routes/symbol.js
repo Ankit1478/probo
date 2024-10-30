@@ -9,7 +9,7 @@ router.post("/create/:stocksymbols",(req,res)=>{
     const  stockSymbol  = req.params.stocksymbols;
     const requestId = uuidv4();
   
-    pushtoRedis({
+    redisPubSub.pushtoRedis({
       type :"newStockSymbol",
       data:stockSymbol,
       requestId: requestId

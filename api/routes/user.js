@@ -11,9 +11,10 @@ router.post("/create/:userId", async (req, res) => {
     // Push into Redis
     redisPubSub.pushtoRedis({
         type: "newUser",
-        data: JSON.stringify({ userId }),
+        data: JSON.stringify( userId ),
         requestId: requestId
     });
+    
 
     // Call publishMessage on the instance
     redisPubSub.publishMessage("newuserAdded", requestId, res);

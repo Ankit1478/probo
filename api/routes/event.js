@@ -1,25 +1,33 @@
 import express from 'express';
 const router = express.Router();
+import { v4 as uuidv4 } from 'uuid';
+import { RedisPubSub } from "../utils/redisClient.js";
+const redisPubSub = new RedisPubSub();
+
+
 import Schema from '../db/schems.js';
 
 
-router.post("/creat",async(req,res)=>{
+router.post("/",async(req,res)=>{
     const { stockSymbol, endTime, description, sourceOfTrade } = req.body;
-  
+    const requestId = uuidv4(); 
+
     const newMarket = new Schema({
       symbol: stockSymbol,
       endTime: new Date(endTime),
       description: description,
       sourceOfTrade: sourceOfTrade,
     });
+
+    await newMarket.save()
+
+    redisPubSub.pushtoRedis({
+        type: "eventCreated",
+        data: stockSymbol,
+        requestId: requestId
+      });
   
-    try {
-      const market = await newMarket.save();
-      res.status(200).json({ market });
-    } catch (error) {
-      console.error("Error creating market event:", error);
-      res.status(500).json({ error: "An error occurred while creating the event." });
-    }
+    redisPubSub.publishMessage("events", requestId, res);
   })
 
 

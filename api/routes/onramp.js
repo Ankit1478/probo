@@ -9,7 +9,7 @@ router.post("/inr", (req, res) => {
     const requestId = uuidv4(); 
   
     // Push into Redis Queue
-    pushtoRedis({
+    redisPubSub.pushtoRedis({
       type: "onrampMoney",
       data: { userId, amount },
       requestId: requestId

@@ -4,20 +4,18 @@ import { v4 as uuidv4 } from 'uuid';
 import { RedisPubSub } from "../utils/redisClient.js";
 const redisPubSub = new RedisPubSub();
 
-router.get("/:symbol",(req,res)=>{
-    const symbol = req.params.symbol
+router.post("/mint", async (req, res) => {
+    const {userId , stockSymbol, quantity} = req.body;
     const requestId = uuidv4();
-  
-     // Push into Queue
-     redisPubSub.pushtoRedis({
-      type: "orderBookCheck",
-      data: symbol,
+   
+    redisPubSub.pushtoRedis({
+      type: "mint",
+      data: {userId,stockSymbol , quantity},
       requestId: requestId
     });
   
-    redisPubSub.publishMessage("getOrderBook", requestId, res);
+    redisPubSub.publishMessage("minttrade", requestId, res);
+  });
   
-  })
-
 
   export default router;

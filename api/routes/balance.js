@@ -7,8 +7,8 @@ const redisPubSub = new RedisPubSub();
 router.get("/inr/:userId", async (req, res) => {
     const userId = req.params.userId;
     const requestId = uuidv4();
-    // Push into Queue
-    pushtoRedis({
+   
+    redisPubSub.pushtoRedis({
       type: "getUserBalance",
       data: userId,
       requestId: requestId
@@ -18,15 +18,14 @@ router.get("/inr/:userId", async (req, res) => {
   });
   
   
-  router.get("/stock/:userId/:stockSymbol", (req,res)=>{
+  router.get("/stock/:userId/", (req,res)=>{
     const userId = req.params.userId;
-    const stockSymbol = req.params.stockSymbol;
     const requestId = uuidv4();
-  
-    // Push into Queue
-    pushtoRedis({
+  console.log("hii")
+   
+  redisPubSub.pushtoRedis({
       type: "getStockBalance",
-      data: {userId, stockSymbol},
+      data: {userId},
       requestId: requestId
     });
   
