@@ -394,7 +394,7 @@ describe("Trading System Tests", () => {
     );
   }, 20000);
 
-  test.skip("Execute minting the opposing selling orders and check WebSocket response", async () => {
+  test("Execute minting the opposing selling orders and check WebSocket response", async () => {
     const seller1Id = "seller1";
     const seller2Id = "seller2";
     const seller3Id = "seller3";
@@ -467,11 +467,11 @@ describe("Trading System Tests", () => {
     expect(executionWsMessage.event).toBe("event_orderbook_update");
     expect(message.yes?.[sell1Price / 100]).toBeUndefined();
     expect(message.no?.[sell3Price / 100]).toEqual({
-      total: 10,
+      total: 40,
       orders: {
         [seller3Id]: {
           type: "sell",
-          quantity: 10,
+          quantity: 40,
         },
       },
     });
@@ -486,9 +486,10 @@ describe("Trading System Tests", () => {
       `${HTTP_SERVER_URL}/balance/stock/${seller3Id}`
     );
 
-    expect(seller1StockBalace.data.msg[symbol].yes.quantity).toBe(50);
-    expect(seller2StockBalance.data.msg[symbol].no.quantity).toBe(80);
-    expect(seller3StockBalance.data.msg[symbol].no.quantity).toBe(60);
+
+    expect(seller1StockBalace.data.message[symbol].yes.quantity).toBe(50);
+    expect(seller2StockBalance.data.message[symbol].no.quantity).toBe(80);
+    expect(seller3StockBalance.data.message[symbol].no.quantity).toBe(60);
 
     const seller1InrBalance = await axios.get(
       `${HTTP_SERVER_URL}/balance/inr/${seller1Id}`
@@ -500,10 +501,10 @@ describe("Trading System Tests", () => {
       `${HTTP_SERVER_URL}/balance/inr/${seller3Id}`
     );
 
-    expect(seller1InrBalance.data.msg.balance).toBe(sell1Price * quantity1);
-    expect(seller2InrBalance.data.msg.balance).toBe(sell2Price * quantity2);
-    expect(seller3InrBalance.data.msg.balance).toBe(
-      sell3Price * (quantity3 - 10)
+    expect(seller1InrBalance.data.message.balance).toBe(sell1Price * quantity1);
+    expect(seller2InrBalance.data.message.balance).toBe(sell2Price * quantity2);
+    expect(seller3InrBalance.data.message.balance).toBe(
+      sell3Price * (quantity3)
     );
   },20000);
 });

@@ -1,12 +1,14 @@
 import express, { json } from 'express';
 const app = express();
-import { ORDERBOOK,STOCK_BALANCES,INR_BALANCES } from './utils/book.js';
+import { ORDERBOOK,STOCK_BALANCES,INR_BALANCES } from './utils/models.js';
 import { createClient } from 'redis';
 import { PrismaClient } from '@prisma/client';
+import { redis } from './utils/redis.js';
+
 const prisma = new PrismaClient();
-const client = createClient();
-const pubsub = createClient();
-await client.connect();
+// const client = createClient();
+// const pubsub = createClient();
+// await client.connect();
 
 
 app.use(express.json());
@@ -20,7 +22,7 @@ async function startTask(datas) {
         case 'eventCreated':
             const eventCreated = data;
             ORDERBOOK[eventCreated] = { yes: {}, no: {} };
-            await pubsub.publish("events", JSON.stringify({
+            redis.publishToRedis("events", JSON.stringify({
                 requestId: requestId,
                 error: false,
                 msg: JSON.stringify(eventCreated)
@@ -31,14 +33,14 @@ async function startTask(datas) {
         case 'getUserBalance':
             const userId = data;
             if (!INR_BALANCES.hasOwnProperty(userId)) {
-                await pubsub.publish("fetchUserBalance", JSON.stringify({
+                redis.publishToRedis("fetchUserBalance", JSON.stringify({
                     requestId: requestId,
                     error: true,
                     msg: JSON.stringify("user doesn't exist")
                 }));
             } else {
                 
-                await pubsub.publish("fetchUserBalance", JSON.stringify({
+                redis.publishToRedis("fetchUserBalance", JSON.stringify({
                     requestId: requestId,
                     error: false,
                     msg: JSON.stringify(INR_BALANCES[userId])
@@ -56,7 +58,7 @@ async function startTask(datas) {
                 
                 INR_BALANCES [userIdMoney] = { balance: 0, locked: 0 };
                 INR_BALANCES[userIdMoney].balance += parseInt(amount);
-                await pubsub.publish("accountUpdate",JSON.stringify({
+                redis.publishToRedis("accountUpdate",JSON.stringify({
                 requestId: requestId,
                 error:false,
                 msg:`${JSON.stringify(`${amount} has added in ${userIdMoney}`)}`
@@ -66,7 +68,7 @@ async function startTask(datas) {
 
                 INR_BALANCES[userIdMoney].balance += parseInt(amount);
                
-                await pubsub.publish("accountUpdate",JSON.stringify({
+                redis.publishToRedis("accountUpdate",JSON.stringify({
                 requestId: requestId,
                 error:false,
                 msg:`${JSON.stringify(`${amount} has added in ${userIdMoney}`)}`
@@ -86,7 +88,7 @@ async function startTask(datas) {
                 STOCK_BALANCES[newuserId] = {}
                 
         
-                await pubsub.publish("newuserAdded",JSON.stringify({
+                redis.publishToRedis("newuserAdded",JSON.stringify({
                     requestId: requestId,
                     error:false,
                     msg:JSON.stringify(newuserId)
@@ -108,7 +110,7 @@ async function startTask(datas) {
 
             ORDERBOOK[newstockSymbol] = {yes: {}, no: {}};
            
-            await pubsub.publish("symbolCreated" ,JSON.stringify({
+            redis.publishToRedis("symbolCreated" ,JSON.stringify({
                 requestId: requestId,
                 error:false,
                 msg:`${JSON.stringify(`${newstockSymbol} created successfully !`)}`
@@ -124,7 +126,7 @@ async function startTask(datas) {
             
                 const orderBooks = ORDERBOOK[symbol]
 
-                await pubsub.publish("getOrderBook" ,JSON.stringify({
+                redis.publishToRedis("getOrderBook" ,JSON.stringify({
                     requestId: requestId,
                     error:false,
                     msg:JSON.stringify(orderBooks)
@@ -133,7 +135,7 @@ async function startTask(datas) {
             }
             else{
             const orderBooks = ORDERBOOK[symbol]
-            await pubsub.publish("getOrderBook" ,JSON.stringify({
+            redis.publishToRedis("getOrderBook" ,JSON.stringify({
                 requestId: requestId,
                 error:false,
                 msg:JSON.stringify(orderBooks)
@@ -177,7 +179,7 @@ async function startTask(datas) {
               STOCK_BALANCES[mintId][mintStockSyambol].no.quantity += parseInt(minQuantity);
              
 
-              await pubsub.publish("minttrade" ,JSON.stringify({
+              redis.publishToRedis("minttrade" ,JSON.stringify({
                 requestId: requestId,
                 error:false,
                 msg:`${JSON.stringify(`${minQuantity} has added in ${mintId}`)}`
@@ -191,7 +193,7 @@ async function startTask(datas) {
 
             if (!STOCK_BALANCES[stockholderUserId] ) {
                 STOCK_BALANCES[stockholderUserId] ={}
-                await pubsub.publish("fetchStockBalance" ,JSON.stringify({
+                redis.publishToRedis("fetchStockBalance" ,JSON.stringify({
                     requestId: requestId,
                     error:true,
                     msg:`${stockholderUserId} doesn't exits !`
@@ -201,7 +203,7 @@ async function startTask(datas) {
 
                 const stockBalance = STOCK_BALANCES[stockholderUserId];
 
-                await pubsub.publish("fetchStockBalance" ,JSON.stringify({
+                redis.publishToRedis("fetchStockBalance" ,JSON.stringify({
                     requestId: requestId,
                     error:false,
                     msg:`${JSON.stringify(stockBalance)}`
@@ -216,7 +218,6 @@ async function startTask(datas) {
             const quantity = data.quantity
             const price = data.price
             const stockType = data.stockType
-    
 
            
             let userBalance =( INR_BALANCES[buyerId].balance)/100;
@@ -226,7 +227,7 @@ async function startTask(datas) {
         
             // Check if user has sufficient INR balance 
             if (userBalance < totalCost) {
-                await pubsub.publish("buyStocks",JSON.stringify({
+                redis.publishToRedis("buyStocks",JSON.stringify({
                     requestId: requestId,
                     error:true,
                     msg:json("insufficent Inr")
@@ -326,14 +327,14 @@ async function startTask(datas) {
                         let prices = totalCost * 100;
                         INR_BALANCES[buyerId].balance -=prices;
 
-                        await pubsub.publish("buyStocks",JSON.stringify({
+                        redis.publishToRedis("buyStocks",JSON.stringify({
                             requestId: requestId,
                             error:false,
                             msg: JSON.stringify({ message: ORDERBOOK })
                         }))
                         
                         
-                        await pubsub.publish(`sentToWebSocket.${stockSymbol}`, JSON.stringify(ORDERBOOK[stockSymbol] ));
+                        redis.publishToRedis(`sentToWebSocket.${stockSymbol}`, JSON.stringify(ORDERBOOK[stockSymbol] ));
                     }
                 }
                 //3rd case - when we need more Quantiy with same Price -> create No order wit same price 
@@ -364,8 +365,6 @@ async function startTask(datas) {
                             
 
                             let transactionAmount = boughtQuantity * price;
-                            console.log("mulily "+ price);
-                            console.log("boughtQuantity "+boughtQuantity)
                             
                             remainingQuantity -= boughtQuantity;
                             
@@ -442,18 +441,18 @@ async function startTask(datas) {
                         STOCK_BALANCES[buyerId][stockSymbol][stockType].locked += parseInt(remainingQuantity)
                     
                         INR_BALANCES[buyerId].balance -= parseInt(totalSpent)
-                        console.log(INR_BALANCES[buyerId])
+                        
                         INR_BALANCES[buyerId].locked += parseInt((quantity * price) - (totalSpent ));
                        
                     }
 
-                    await pubsub.publish("buyStocks",JSON.stringify({
+                    redis.publishToRedis("buyStocks",JSON.stringify({
                         requestId: requestId,
                         error:false,
                         msg:JSON.stringify(ORDERBOOK) 
                     }))
 
-                    await pubsub.publish(`sentToWebSocket.${stockSymbol}`, JSON.stringify(ORDERBOOK[stockSymbol] ));
+                    redis.publishToRedis(`sentToWebSocket.${stockSymbol}`, JSON.stringify(ORDERBOOK[stockSymbol] ));
 
                 }
             }
@@ -519,7 +518,7 @@ async function startTask(datas) {
                 transaction.push(newTransaction);
 
                 // Publish updates
-                await pubsub.publish("buyStocks", JSON.stringify({
+                redis.publishToRedis("buyStocks", JSON.stringify({
                     requestId: requestId,
                     error: false,
                     msg: JSON.stringify({ message: ORDERBOOK })
@@ -527,7 +526,7 @@ async function startTask(datas) {
 
                
                
-                await pubsub.publish(`sentToWebSocket.${stockSymbol}`, JSON.stringify(ORDERBOOK[stockSymbol] ));
+                redis.publishToRedis(`sentToWebSocket.${stockSymbol}`, JSON.stringify(ORDERBOOK[stockSymbol] ));
      }
         break;
         
@@ -541,7 +540,7 @@ async function startTask(datas) {
             
            
             if (!STOCK_BALANCES[sellerId] || !STOCK_BALANCES[sellerId][sellerStockSymbol] || !STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType]) {
-                await pubsub.publish("sellStocks",JSON.stringify({
+                redis.publishToRedis("sellStocks",JSON.stringify({
                     requestId: requestId,
                     error:true,
                     msg: JSON.stringify("Nop Stocks Found!") 
@@ -553,7 +552,7 @@ async function startTask(datas) {
 
             const reverseStockType = sellerStockType === "yes" ? "no" : "yes";
             if (STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].quantity < sellerQuantity) {
-                await pubsub.publish("sellStocks",JSON.stringify({
+                redis.publishToRedis("sellStocks",JSON.stringify({
                     requestId: requestId,
                     error:true,
                     msg: JSON.stringify("you have not enough quantity to sell Stoc") 
@@ -563,6 +562,7 @@ async function startTask(datas) {
            
         
              if (!ORDERBOOK[sellerStockSymbol] || !ORDERBOOK[sellerStockSymbol][sellerStockType] || !ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice]) {
+                
                 ORDERBOOK[sellerStockSymbol] = ORDERBOOK[sellerStockSymbol] || { yes: {}, no: {} };
                 ORDERBOOK[sellerStockSymbol][sellerStockType] = ORDERBOOK[sellerStockSymbol][sellerStockType] || {};
                 ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice/100] = {
@@ -576,10 +576,14 @@ async function startTask(datas) {
                 }
         
                 STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].locked += sellerQuantity;
-                STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].sellerQuantity -= sellerQuantity;
+                STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].quantity-= parseInt(sellerQuantity)
+                console.log(sellerId)
+                console.log(STOCK_BALANCES[sellerId][sellerStockSymbol])
+                console.log(STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].quantity)
             }
 
             else  if(ORDERBOOK[sellerStockSymbol] && ORDERBOOK[sellerStockSymbol][sellerStockType] && !ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice]){
+              
                 ORDERBOOK[sellerStockSymbol] = {
                     [reverseStockType]:
                    {[10 - sellerPrice/100] : {
@@ -608,7 +612,7 @@ async function startTask(datas) {
                 }
                 ORDERBOOK[sellerStockSymbol][sellerStockType][sellerPrice].total = totalsellerPrice
                 if (STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].quantity < sellerQuantity) {
-                    await pubsub.publish("sellStocks",JSON.stringify({
+                    redis.publishToRedis("sellStocks",JSON.stringify({
                         requestId: requestId,
                         error:true,
                         msg: JSON.stringify("you have not enough quantity to sell Stock") 
@@ -620,6 +624,27 @@ async function startTask(datas) {
                     STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType].quantity -= parseInt(sellerQuantity);
                 }
             }
+
+            const stockFor = ORDERBOOK[sellerStockSymbol][sellerStockType];
+            const priceForStock = Object.keys(stockFor).toString()
+
+
+            const stockreverse = ORDERBOOK[sellerStockSymbol][reverseStockType];
+            if(stockreverse!=undefined){
+                const priceForReverseStock = Object.keys(stockreverse).toString()
+                if(parseInt(priceForStock) + parseInt(priceForReverseStock)<= 10){
+
+                    delete ORDERBOOK[sellerStockSymbol][sellerStockType]
+                    delete  ORDERBOOK[sellerStockSymbol][reverseStockType]
+                }
+            }
+            
+
+            
+            // console.log(priceForReverseStock)
+            
+            
+           
            
             const newTransaction = {
                 id: generateUniqueId(),
@@ -648,13 +673,13 @@ async function startTask(datas) {
             //     data: newTransaction,
             //   });
               
-            await pubsub.publish("sellStocks",JSON.stringify({
+            redis.publishToRedis("sellStocks",JSON.stringify({
                 requestId: requestId,
                 error:false,
                 msg: JSON.stringify(combinedBalances) 
             }))
             
-            await pubsub.publish(`sentToWebSocket.${sellerStockSymbol}`, JSON.stringify(ORDERBOOK[sellerStockSymbol] ));
+            redis.publishToRedis(`sentToWebSocket.${sellerStockSymbol}`, JSON.stringify(ORDERBOOK[sellerStockSymbol] ));
 
             break
 
@@ -665,7 +690,7 @@ async function startTask(datas) {
             Object.keys(ORDERBOOK).forEach(key => delete ORDERBOOK[key]);
             Object.keys(STOCK_BALANCES).forEach(key => delete STOCK_BALANCES[key]);
 
-            await pubsub.publish("resetMemory", JSON.stringify({
+            redis.publishToRedis("resetMemory", JSON.stringify({
                 requestId: requestId,
                 error: false,
                 msg: JSON.stringify("reset Done") 
@@ -677,9 +702,10 @@ async function startTask(datas) {
 }
 
 async function worker() {
+    await new Promise(resolve => setTimeout(resolve, 1000));
     while (true) {
         try {
-            const result = await client.blPop("RedisQueue",0);
+            const result = await redis.popFromRedis("RedisQueue")
             startTask(result.element)
         }
         catch (e) {
@@ -701,10 +727,6 @@ const generateEventId = (stockSymbol, stockType) => {
 
 
 app.listen(3001, async () => {
-    await Promise.all([
-       
-        pubsub.connect(),
-    ])
     await worker();
     console.log("Engine is running properly at port 3001")
 })
