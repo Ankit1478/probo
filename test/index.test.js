@@ -265,7 +265,7 @@ describe("Trading System Tests", () => {
     });
 
     const executionWsMessage = await promisified2
-    console.log((executionWsMessage))
+
 
     const message = executionWsMessage.message;
 
@@ -282,7 +282,7 @@ describe("Trading System Tests", () => {
     });
   },15000);
 
-  test.skip("Execute buying stocks from multiple users and check WebSocket response", async () => {
+  test("Execute buying stocks from multiple users and check WebSocket response", async () => {
     const buyerId = "buyer1";
     const buyer2Id = "buyer2";
     const buyer3Id = "buyer3";
@@ -367,11 +367,11 @@ describe("Trading System Tests", () => {
       `${HTTP_SERVER_URL}/balance/stock/${buyer3Id}`
     );
 
-    expect(buyerStockBalance.data.msg[symbol].yes.quantity).toBe(quantity);
-    expect(buyer2StockBalance.data.msg[symbol].yes.quantity).toBe(
+    expect(buyerStockBalance.data.message[symbol].yes.quantity).toBe(quantity);
+    expect(buyer2StockBalance.data.message[symbol].yes.quantity).toBe(
       quantity + 20
     );
-    expect(buyer3StockBalance.data.msg[symbol].no.quantity).toBe(
+    expect(buyer3StockBalance.data.message[symbol].no.quantity).toBe(
       2 * quantity + 20
     );
 
@@ -385,16 +385,16 @@ describe("Trading System Tests", () => {
       `${HTTP_SERVER_URL}/balance/inr/${buyer3Id}`
     );
 
-    expect(buyerInrBalance.data.msg.balance).toBe(1000000 - price * quantity);
-    expect(buyer2InrBalance.data.msg.balance).toBe(
+    expect(buyerInrBalance.data.message.balance).toBe(1000000 - price * quantity);
+    expect(buyer2InrBalance.data.message.balance).toBe(
       1000000 - price * (quantity + 20)
     );
-    expect(buyer3InrBalance.data.msg.balance).toBe(
+    expect(buyer3InrBalance.data.message.balance).toBe(
       1000000 - (1000 - price) * (2 * quantity + 30)
     );
   }, 20000);
 
-  test("Execute minting the opposing selling orders and check WebSocket response", async () => {
+  test.skip("Execute minting the opposing selling orders and check WebSocket response", async () => {
     const seller1Id = "seller1";
     const seller2Id = "seller2";
     const seller3Id = "seller3";

@@ -264,7 +264,7 @@ async function startTask(datas) {
                         let stocks = ORDERBOOK[stockSymbol][stockType][price/100].orders;
 
                         for (const seller in stocks) {
-                            console.log("isme")
+
                             if (remainingQuantity == 0) break;
                             let availableQuantity = stocks[seller].quantity;
 
@@ -325,7 +325,7 @@ async function startTask(datas) {
 
                         let prices = totalCost * 100;
                         INR_BALANCES[buyerId].balance -=prices;
-                       console.log(ORDERBOOK)
+
                         await pubsub.publish("buyStocks",JSON.stringify({
                             requestId: requestId,
                             error:false,
@@ -340,23 +340,20 @@ async function startTask(datas) {
                 else {
                     let remainingQuantity = quantity;
                     let totalSpent = 0;
-                   
 
                     if (ORDERBOOK[stockSymbol] && ORDERBOOK[stockSymbol][stockType] && ORDERBOOK[stockSymbol][stockType][price/100]) {
                         let stocks = ORDERBOOK[stockSymbol][stockType][price/100].orders;
-                        console.log(stocks)
+                        
 
                         for (const seller in stocks) {
-                            console.log("seller" + seller)
-                            console.log("remainingQuantity "+ remainingQuantity )
+                            
 
                             if (remainingQuantity == 0) break;
-                            console.log("availableQuantity" + stocks[seller].quantity)
+
                             let availableQuantity = stocks[seller].quantity;
 
                             //how many stocks i have to buy 
                             let boughtQuantity = Math.min(parseInt(availableQuantity), parseInt(remainingQuantity));
-                            console.log("boughtQuantity "+ boughtQuantity)
                             
 
                             stocks[seller] -= boughtQuantity;
@@ -367,11 +364,15 @@ async function startTask(datas) {
                             
 
                             let transactionAmount = boughtQuantity * price;
+                            console.log("mulily "+ price);
+                            console.log("boughtQuantity "+boughtQuantity)
                             
                             remainingQuantity -= boughtQuantity;
-                            console.log(remainingQuantity)
+                            
+                            
                             
                             totalSpent += transactionAmount;
+                            
 
                             ORDERBOOK[stockSymbol][stockType][price/100].total -= (boughtQuantity);
 
@@ -387,10 +388,8 @@ async function startTask(datas) {
                                 STOCK_BALANCES[buyerId][stockSymbol][stockType] = { quantity: 0, locked: 0 };
                             }
                             STOCK_BALANCES[buyerId][stockSymbol][stockType].quantity += parseInt(boughtQuantity);
-                            // console.log(STOCK_BALANCES)
-                            //seller Account INR Update
-                            INR_BALANCES[seller].balance += parseInt(transactionAmount * 100);
-
+                            
+                        
                             let newTransaction = {
                                 id: generateUniqueId(),
                                 buyerAccountId: buyerId,
@@ -418,7 +417,8 @@ async function startTask(datas) {
                         const reverseStockType = stockType === "yes" ? "no" : "yes";
                         const reverseAmount = 10 - (price/100);
 
-                        console.log(remainingQuantity)
+                        // console.log("remainingQuantity " + remainingQuantity)
+                      
                         // Check if reverseStockType exists in the order book, if not, initialize it
                         if(remainingQuantity>0)
                         { 
@@ -436,11 +436,14 @@ async function startTask(datas) {
                                      } 
                             }
                             }
+                            INR_BALANCES[buyerId].balance -= parseInt(remainingQuantity * price)
                         }}
 
                         STOCK_BALANCES[buyerId][stockSymbol][stockType].locked += parseInt(remainingQuantity)
-                        INR_BALANCES[buyerId].balance -= parseInt(totalSpent * 100)
-                        INR_BALANCES[buyerId].locked += parseInt((quantity * price) * 100 - (totalSpent * 100));
+                    
+                        INR_BALANCES[buyerId].balance -= parseInt(totalSpent)
+                        console.log(INR_BALANCES[buyerId])
+                        INR_BALANCES[buyerId].locked += parseInt((quantity * price) - (totalSpent ));
                        
                     }
 
@@ -457,40 +460,46 @@ async function startTask(datas) {
             else {
 
                 let transaction = [];
-              
+                
+                
 
                 const reverseStockType = stockType === "yes" ? "no" : "yes";
                 const reverseAmount = (10 - price/ 100) ; 
 
                 // Update user balances
-                const userbalance = INR_BALANCES[buyerId].balance / 100;
-                const totalcost = (price / 100) * (quantity / 100);
-                const totalamount = userbalance - totalcost;
+                const userbalances = INR_BALANCES[buyerId].balance ;
+                //  console.log(userbalances)
+                // console.log(parseInt(price) * parseInt(quantity))
                 
-                INR_BALANCES[buyerId].balance = totalamount * 100;
-                INR_BALANCES[buyerId].locked += totalamount * 100;
+                const totalcosts = parseInt(price) * parseInt(quantity);
+        
+                const totalamount = userbalances - totalcosts;
+               
+                
+                INR_BALANCES[buyerId].balance -= totalcosts;
+                INR_BALANCES[buyerId].locked += totalcosts;
 
-                // Create the exact orderbook structure expected by the test
-                ORDERBOOK[stockSymbol][reverseStockType][reverseAmount] = {
-                    total: quantity,
-                    orders: {
-                    [buyerId]: {
+                if(ORDERBOOK[stockSymbol][reverseStockType].hasOwnProperty(reverseAmount)){
+                    const orders =  ORDERBOOK[stockSymbol][reverseStockType][reverseAmount].orders
+                    ORDERBOOK[stockSymbol][reverseStockType][reverseAmount].total+=parseInt(quantity);
+                    orders[buyerId] ={
                         type: "reverted",
                         quantity: quantity,
                     }
-                    }
-                };
-                
-
-               
-                if (!STOCK_BALANCES[buyerId][stockSymbol]) {
-                    STOCK_BALANCES[buyerId][stockSymbol] = {
-                    [stockType]: {
-                        quantity: 0,
-                        locked: quantity
-                    }
+                }
+                // Create the exact orderbook structure expected by the test
+                else {
+                    ORDERBOOK[stockSymbol][reverseStockType][reverseAmount] = {
+                        total: quantity,
+                        orders: {
+                        [buyerId]: {
+                            type: "reverted",
+                            quantity: quantity,
+                        }
+                        }
                     };
                 }
+                
                 STOCK_BALANCES[buyerId][stockSymbol][stockType].quantity+=parseInt(quantity)
 
                 
@@ -529,13 +538,7 @@ async function startTask(datas) {
             const sellerQuantity = data.quantity
             const sellerPrice = data.price
             const sellerStockType = data.stockType
-            if(!INR_BALANCES[sellerId]){
-                INR_BALANCES[sellerId]={
-                    balance:0,
-                    locked:0
-                }
-            }
-           
+            
            
             if (!STOCK_BALANCES[sellerId] || !STOCK_BALANCES[sellerId][sellerStockSymbol] || !STOCK_BALANCES[sellerId][sellerStockSymbol][sellerStockType]) {
                 await pubsub.publish("sellStocks",JSON.stringify({
