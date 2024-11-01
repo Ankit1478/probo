@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend-1
+  template:
+    metadata:
+      labels:
+        app: backend-1
+    spec:
+      containers:
+      - name: backend-1
+        image: ankit1478/api:tag # Make sure this tag matches the newly pushed image
+        ports:
+        - containerPort: 3000
+        env:
+        - name: REDIS_HOST
+          value: "redis-service"
+        - name: REDIS_PORT
+          value: "6379"

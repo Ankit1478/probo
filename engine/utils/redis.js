@@ -3,8 +3,15 @@ import { createClient } from 'redis';
 
 export class RedisPubSub{  
     constructor(){
-        this.pubsub = createClient();
-        this.client = createClient();
+        this.pubsub = createClient({
+            host: 'redis-service', // The service name from your Kubernetes configuration
+            port: 6379, // Default Redis port
+            
+        });
+        this.client = createClient({
+            host: 'redis-service', // The service name from your Kubernetes configuration
+            port: 6379, // Default Redis port
+        });
         this.thisConnection();
     }
 

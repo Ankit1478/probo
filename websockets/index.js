@@ -5,8 +5,14 @@ import { createClient } from 'redis';
 const app = express();
 const httpServer = app.listen(8080);
 const clients = new Map();
-const redisClient = createClient();
-const redisPublisher = createClient();
+const redisClient = createClient({
+  host: 'redis-service', // The service name from your Kubernetes configuration
+  port: 6379, // Default Redis port
+});
+const redisPublisher = createClient({
+  host: 'redis-service', // The service name from your Kubernetes configuration
+  port: 6379, // Default Redis port
+});
 
 await redisClient.connect();
 await redisPublisher.connect();

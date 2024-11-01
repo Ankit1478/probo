@@ -10,22 +10,17 @@ import onrampRouter from "./routes/onramp.js"
 import symbolCreated from "./routes/symbol.js"
 import reseRoutet from "./routes/reset.js"
 import tradeRouter from "./routes/mint.js"
-
+import { createClient } from 'redis';
+const pubsub = createClient({
+    host: 'redis-service', 
+    port: 6379,
+});
+await pubsub.connect().then(()=>{
+  console.log("connected to pubsub")
+})
 
 const app = express();
 app.use(express.json());
-
-
-// const mongoUri = process.env.DATABASE_URL
-
-// mongoose.connect(mongoUri, {
-//   useNewUrlParser: true,
-//   useUnifiedTopology: true,
-// })
-// .then(() => console.log("Connected to MongoDB"))
-// .catch((error) => console.error("MongoDB connection error:", error));
-
-
 
 app.use("/event",eventRouter);
 app.use("/user",userRouter);
@@ -36,6 +31,19 @@ app.use("/orderbook",orderbookRouter)
 app.use("/symbol", symbolCreated)
 app.use("/reset",reseRoutet)
 app.use("/trade",tradeRouter)
+
+app.get("/",(req,res)=>{
+res.send("hiii")
+})
+
+const mongoUri = process.env.DATABASE_URL
+
+mongoose.connect(mongoUri, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log("Connected to MongoDB"))
+.catch((error) => console.error("MongoDB connection error:", error));
 
 
 export default app;
