@@ -83,7 +83,7 @@ async function startTask(datas) {
            
 
                 INR_BALANCES[newuserId]= { balance: 0, locked: 0 };
-                // console.log(INR_BALANCES)
+                
                
                 STOCK_BALANCES[newuserId] = {}
                 
@@ -416,9 +416,7 @@ async function startTask(datas) {
                         const reverseStockType = stockType === "yes" ? "no" : "yes";
                         const reverseAmount = 10 - (price/100);
 
-                        // console.log("remainingQuantity " + remainingQuantity)
-                      
-                        // Check if reverseStockType exists in the order book, if not, initialize it
+                       
                         if(remainingQuantity>0)
                         { 
                         if (!ORDERBOOK[stockSymbol][reverseStockType]) {
